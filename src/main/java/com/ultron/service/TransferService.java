@@ -4,6 +4,7 @@ import java.sql.Connection;
 import java.sql.PreparedStatement;
 import java.sql.ResultSet;
 import java.sql.SQLException;
+import java.sql.Savepoint;
 import java.sql.Statement;
 
 import com.ultron.dto.TransferLog;
@@ -15,18 +16,32 @@ public class TransferService {
 
 		try (Connection con = ConnectionManager.getConnection()) {
 
+			Savepoint point = null;
+
 			try {
-				con.setAutoCommit(false);
+				// Isolation Level
+				con.setTransactionIsolation(Connection.TRANSACTION_REPEATABLE_READ);
+
+				// Start Transaction
+//				con.setAutoCommit(false);
+
 				// get amount from account from
 				int fromAmount = getAmount(con, fromId);
 
-				// check amount
-				if (fromAmount < amount) {
-					throw new IllegalArgumentException("No Enough Amount To Transfer !");
-				}
-
 				// get amount from account to
 				int toAmount = getAmount(con, toId);
+
+				// Start Point
+				createTransferLog(con, fromId, toId, amount, fromAmount, toAmount, "Start");
+				point = con.setSavepoint("Start Save Point");
+
+				// check amount
+				if (fromAmount < amount) {
+					// Error Point
+					createTransferLog(con, fromId, toId, amount, fromAmount, toAmount, "Error");
+					point = con.setSavepoint("Error Save Point");
+					throw new IllegalArgumentException("No Enough Amount To Transfer !");
+				}
 
 				// update from amount
 				setAmount(con, fromId, fromAmount - amount);
@@ -35,16 +50,20 @@ public class TransferService {
 				setAmount(con, toId, toAmount + amount);
 
 				// insert into transfer log
-				int logId = createTransferLog(con, fromId, toId, amount, fromAmount, toAmount);
+				int logId = createTransferLog(con, fromId, toId, amount, fromAmount, toAmount, "Success");
+				point = con.setSavepoint("Success Save Point");
 
 				// select transfer log data
 				TransferLog result = getTransferLog(con, logId);
 
-				con.commit();
+				// Commit End
+				// con.commit();
 				return result;
 
-			} catch (SQLException e) {
-				con.rollback();
+			} catch (Exception e) {
+				if (null != point) {
+					con.rollback(point);
+				}
 			}
 
 		} catch (SQLException e) {
@@ -84,11 +103,11 @@ public class TransferService {
 	}
 
 	// Create Transfer Log
-	private int createTransferLog(Connection con, int fromId, int toId, double amount, int fromAmount, int toAmount)
-			throws SQLException {
+	private int createTransferLog(Connection con, int fromId, int toId, double amount, int fromAmount, int toAmount,
+			String status) throws SQLException {
 
-		final String INSERTLOG = "INSERT INTO transfer_logs(from_account,to_account,amount,from_amount,to_amount)"
-				+ "VALUES(?,?,?,?,?); ";
+		final String INSERTLOG = "INSERT INTO transfer_logs(from_account,to_account,amount,from_amount,to_amount,status)"
+				+ "VALUES(?,?,?,?,?,?); ";
 
 		PreparedStatement prep = con.prepareStatement(INSERTLOG, Statement.RETURN_GENERATED_KEYS);
 		prep.setInt(1, fromId);
@@ -96,6 +115,7 @@ public class TransferService {
 		prep.setDouble(3, amount);
 		prep.setDouble(4, fromAmount);
 		prep.setDouble(5, toAmount);
+		prep.setString(6, status);
 
 		prep.executeUpdate();
 

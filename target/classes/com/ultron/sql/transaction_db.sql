@@ -26,6 +26,7 @@ transfer_time TIMESTAMP DEFAULT NOW() NOT NULL,
 amount DECIMAL(10,2),
 from_amount DECIMAL(10,2),
 to_amount DECIMAL(10,2),
+status VARCHAR(20),
 FOREIGN KEY fk_transfer_account_1 (from_account)REFERENCES accounts(id),
 FOREIGN KEY fk_transfer_account_2 (to_account)REFERENCES accounts(id)
 
